@@ -17,6 +17,7 @@ from download import find_model
 from models import DiT_models
 import argparse
 
+import numpy as np
 
 def main(args):
     # Setup PyTorch:
@@ -43,13 +44,19 @@ def main(args):
     diffusion = create_diffusion(str(args.num_sampling_steps))
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
-    # Labels to condition the model with (feel free to change):
-    class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
+    # Labels to condition the model with (ImageNet classes):
+    # in case cuda out of memory, at one time please just generate 300 images at most.
+    # class_labels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    class_labels = np.arange(100)
 
     # Create sampling noise:
     n = len(class_labels)
     z = torch.randn(n, 4, latent_size, latent_size, device=device)
     y = torch.tensor(class_labels, device=device)
+
+    # Sample 51 images for each class:
+    # z = z.repeat(51, 1, 1, 1)
+    # y = y.repeat(51)
 
     # Setup classifier-free guidance:
     z = torch.cat([z, z], 0)
@@ -63,9 +70,25 @@ def main(args):
     )
     samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     samples = vae.decode(samples / 0.18215).sample
+    # Save all the generated images into "/personal_storage/scout/fid-flaws/data/gen_img_dit"
+    
+    """
+    # Sample images:
+    samples = diffusion.p_sample_loop(
+        model.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+    )
+    print(samples.shape, "before the null class removal")
+    samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
+    samples = vae.decode(samples / 0.18215).sample
+    print(samples.shape, "after the null class removal")
+    # now all the images are saved in a single image, this is not what we want
+    # we want to save each image separately
+    """
 
     # Save and display images:
-    save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
+    for i in range(samples.shape[0]):
+        save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{i}.png", normalize=True, value_range=(-1, 1))
+    # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
 
 if __name__ == "__main__":
