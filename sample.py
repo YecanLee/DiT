@@ -55,12 +55,12 @@ def main(args):
     y = torch.tensor(class_labels, device=device)
 
     # Sample 51 images for each class:
-    # z = z.repeat(51, 1, 1, 1)
-    # y = y.repeat(51)
+    z = z.repeat(51, 1, 1, 1)
+    y = y.repeat(51)
 
     # Setup classifier-free guidance:
     z = torch.cat([z, z], 0)
-    y_null = torch.tensor([1000] * n, device=device)
+    y_null = torch.tensor([1000] * n * 51, device=device)
     y = torch.cat([y, y_null], 0)
     model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
 
@@ -72,6 +72,10 @@ def main(args):
     samples = vae.decode(samples / 0.18215).sample
     # Save all the generated images into "/personal_storage/scout/fid-flaws/data/gen_img_dit"
     
+    # Save and display images:
+    for i in range(samples.shape[0]):
+        class_label = class_labels[i // 51]
+        save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{class_label}_{i % 51}.png", normalize=True, value_range=(-1, 1))
     """
     # Sample images:
     samples = diffusion.p_sample_loop(
@@ -84,11 +88,12 @@ def main(args):
     # now all the images are saved in a single image, this is not what we want
     # we want to save each image separately
     """
-
+    """
     # Save and display images:
     for i in range(samples.shape[0]):
         save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{i}.png", normalize=True, value_range=(-1, 1))
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
+    """
 
 
 if __name__ == "__main__":
