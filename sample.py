@@ -47,12 +47,22 @@ def main(args):
     # Labels to condition the model with (ImageNet classes):
     # in case cuda out of memory, at one time please just generate 300 images at most.
     # class_labels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-    class_labels = np.arange(100)
+    class_labels = np.arange(1000)
 
+    batch_size = 1
+
+    for i in range(0, len(class_labels), batch_size):
+        batch_labels = class_labels[i:i + batch_size]
+        generate_samples(batch_labels, model, diffusion, vae, latent_size, device, args)
+
+        torch.cuda.empty_cache()
+
+
+def generate_samples(batch_labels, model, diffusion, vae, latent_size, device, args):
     # Create sampling noise:
-    n = len(class_labels)
+    n = len(batch_labels)
     z = torch.randn(n, 4, latent_size, latent_size, device=device)
-    y = torch.tensor(class_labels, device=device)
+    y = torch.tensor(batch_labels, device=device)
 
     # Sample 51 images for each class:
     z = z.repeat(51, 1, 1, 1)
@@ -60,9 +70,11 @@ def main(args):
 
     # Setup classifier-free guidance:
     z = torch.cat([z, z], 0)
-    y_null = torch.tensor([1000] * n * 51, device=device)
-    y = torch.cat([y, y_null], 0)
+    y_null = torch.full_like(y, 1000)
+    y = torch.cat([y, y_null], 0).long()
     model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
+
+    # model_kwargs['y'] = model_kwargs['y'].to(torch.long)
 
     # Sample images:
     samples = diffusion.p_sample_loop(
@@ -74,7 +86,7 @@ def main(args):
     
     # Save and display images:
     for i in range(samples.shape[0]):
-        class_label = class_labels[i // 51]
+        class_label = batch_labels[i // 51]
         save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{class_label}_{i % 51}.png", normalize=True, value_range=(-1, 1))
     """
     # Sample images:
@@ -87,8 +99,6 @@ def main(args):
     print(samples.shape, "after the null class removal")
     # now all the images are saved in a single image, this is not what we want
     # we want to save each image separately
-    """
-    """
     # Save and display images:
     for i in range(samples.shape[0]):
         save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{i}.png", normalize=True, value_range=(-1, 1))
@@ -104,7 +114,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     args = parser.parse_args()
