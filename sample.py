@@ -88,23 +88,6 @@ def generate_samples(batch_labels, model, diffusion, vae, latent_size, device, a
     for i in range(samples.shape[0]):
         class_label = batch_labels[i // 51]
         save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{class_label}_{i % 51}.png", normalize=True, value_range=(-1, 1))
-    """
-    # Sample images:
-    samples = diffusion.p_sample_loop(
-        model.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
-    )
-    print(samples.shape, "before the null class removal")
-    samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
-    samples = vae.decode(samples / 0.18215).sample
-    print(samples.shape, "after the null class removal")
-    # now all the images are saved in a single image, this is not what we want
-    # we want to save each image separately
-    # Save and display images:
-    for i in range(samples.shape[0]):
-        save_image(samples[i], f"/personal_storage/scout/fid-flaws/data/gen_img_dit/sample_{i}.png", normalize=True, value_range=(-1, 1))
-    # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
-    """
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -112,7 +95,7 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="mse")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--cfg-scale", type=float, default=4.0)
+    parser.add_argument("--cfg-scale", type=float, default=1.5)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=100)
     parser.add_argument("--ckpt", type=str, default=None,
