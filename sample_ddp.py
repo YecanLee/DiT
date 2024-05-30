@@ -75,6 +75,7 @@ def main(args):
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
+    model = torch.compile(model)
     diffusion = create_diffusion(str(args.num_sampling_steps))
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
@@ -95,19 +96,21 @@ def main(args):
     n = args.per_proc_batch_size
     global_batch_size = n * dist.get_world_size() # dist.get_world_size is the number of GPUs available
     # To make things evenly-divisible, we'll sample a bit more than we need and then discard the extra samples:
-    total_samples = args.num_images_per_class * args.num_classes
+    total_samples = int(math.ceil(args.num_fid_samples / global_batch_size) * global_batch_size)
     if rank == 0:
         print(f"Total number of images that will be sampled: {total_samples}")
     assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
     samples_needed_this_gpu = int(total_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
+
+    total = 0
+
     for i in range(args.num_classes):
-        pbar = tqdm(range(args.num_images_per_class), desc=f"Sampling images for class {i}")
-        total_samples = 0
-        for _ in pbar:
+        pbar = tqdm(range(0, args.num_images_per_class, args.per_proc_batch_size), desc=f"Sampling images for class {i}")
+        for j in pbar:
             # Sample inputs:
             z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
-            y = torch.randint((n,), device=device)
+            y = torch.full((n,), i, device=device) 
 
             # Setup classifier-free guidance:
             if using_cfg:
@@ -150,8 +153,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
-    parser.add_argument("--per-proc-batch-size", type=int, default=32)
-    parser.add_argument("--num-fid-samples", type=int, default=50_000)
+    parser.add_argument("--per-proc-batch-size", type=int, default=64)
+    parser.add_argument("--num-fid-samples", type=int, default=51_000)
     parser.add_argument("--num-images-per-class",type=int, default=51, help="Number of images per class to sample.")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
