@@ -95,22 +95,26 @@ def main(args):
     # Figure out how many samples we need to generate on each GPU and how many iterations we need to run:
     n = args.per_proc_batch_size
     global_batch_size = n * dist.get_world_size() # dist.get_world_size is the number of GPUs available
-    # To make things evenly-divisible, we'll sample a bit more than we need and then discard the extra samples:
-    total_samples = int(math.ceil(args.num_fid_samples / global_batch_size) * global_batch_size)
+    total_images = args.num_images_per_class * args.num_classes
+    # In case the total number of images is not divisible by the global batch size, 
+    total_samples = int(math.ceil(total_images / global_batch_size) * global_batch_size)
     if rank == 0:
         print(f"Total number of images that will be sampled: {total_samples}")
     assert total_samples % dist.get_world_size() == 0, "total_samples must be divisible by world_size"
     samples_needed_this_gpu = int(total_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
+    iterations = int(samples_needed_this_gpu // n)
+    pbar = range(iterations)
+    pbar = tqdm(pbar, desc="Sampling images") if rank==0 else pbar
 
     total = 0
-
-    for i in range(args.num_classes):
-        pbar = tqdm(range(0, args.num_images_per_class, args.per_proc_batch_size), desc=f"Sampling images for class {i}")
-        for j in pbar:
+    for _ in pbar:
+            # Create equally distributed class labels
+            y = torch.arange(args.num_classes, device=device).repeat_interleave(args.num_images_per_class // dist.get_world_size())
+            y = y[total // dist.get_world_size(): total // dist.get_world_size() + n]
+            
             # Sample inputs:
             z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
-            y = torch.full((n,), i, device=device) 
 
             # Setup classifier-free guidance:
             if using_cfg:
@@ -137,13 +141,14 @@ def main(args):
             for i, sample in enumerate(samples):
                 index = i * dist.get_world_size() + rank + total
                 Image.fromarray(sample).save(f"{sample_folder_dir}/{index:06d}.png")
+
             total += global_batch_size
 
-        # Make sure all processes have finished saving their samples before attempting to convert to .npz
-        dist.barrier()
-        if rank == 0:
-            create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
-            print("Done.")
+    # Make sure all processes have finished saving their samples before attempting to convert to .npz
+    dist.barrier()
+    if rank == 0:
+        # create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
+        print("Done.")
         dist.barrier()
         dist.destroy_process_group()
 
