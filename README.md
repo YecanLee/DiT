@@ -131,6 +131,14 @@ torchrun --nnodes=1 --nproc_per_node=N sample_ddp.py --model DiT-XL/2 --num-fid-
 
 There are several additional options; see [`sample_ddp.py`](sample_ddp.py) for details. 
 
+### FID flaw image generating.
+To generate images used in the "dgm-eval“ repo, please use the following commands: \
+```shell
+torchrun --nnodes=1 --nproc_per_node=2 sample_ddp.py --model DiT-XL/2 --num-fid-samples 51000 --num-images-per-class 51 --num-classes 1000
+```
+__Do notice that DDP method will need to generate more images than we need, since we need to balance the `local batch size` versus the `global batch size`, however, we need to check if the code we are using right now are creating bottlenecks in the computation process.__  \
+For a fast speed compadrison, the generative process on a __single 4090 GPU__ would take around __33 hours__ for __51000__ images, the generative process on __two A6000 GPUs__ would take around 24 hours, I added this method to pratice DDP techniques instead of really trying to speed up some codes.
+
 
 ## Differences from JAX
 
