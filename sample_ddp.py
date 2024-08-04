@@ -1,9 +1,6 @@
 """
-Samples a large number of images from a pre-trained DiT model using DDP.
-Subsequently saves a .npz file that can be used to compute FID and other
-evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/tree/main/evaluations
-
-For a simple single-GPU/CPU sampling script, see sample.py.
+This script demonstrates how to sample images from a DiT model using DDP (Distributed Data Parallel) with PyTorch.
+It implements a customized sampling loop which users could control the number of images to sample per class.
 """
 import torch
 import torch.distributed as dist
@@ -19,35 +16,10 @@ import math
 import argparse
 
 
-def create_npz_from_sample_folder(sample_dir, num=50_000):
-    """
-    Builds a single .npz file from a folder of .png samples.
-    """
-    samples = []
-    for i in trange(num, desc="Building .npz file from samples"):
-        sample_pil = Image.open(f"{sample_dir}/{i:06d}.png")
-        sample_np = np.asarray(sample_pil).astype(np.uint8)
-        samples.append(sample_np)
-    samples = np.stack(samples)
-    assert samples.shape == (num, samples.shape[1], samples.shape[2], 3)
-    npz_path = f"{sample_dir}.npz"
-    np.savez(npz_path, arr_0=samples)
-    print(f"Saved .npz file to {npz_path} [shape={samples.shape}].")
-    return npz_path
-
-
 def main(args):
     """
     Run sampling.
     """
-    if args.tf32: # True: fast but may lead to some small numerical differences
-        tf32 = True
-        torch.backends.cudnn.allow_tf32 = bool(tf32)
-        torch.backends.cuda.matmul.allow_tf32 = bool(tf32)
-        torch.set_float32_matmul_precision('high' if tf32 else 'highest')
-        print(f"Fast inference mode is enabled🏎️🏎️🏎️. TF32: {tf32}")
-    else:
-        print("Fast inference mode is disabled🐢🐢🐢, you may enable it by passing the '--tf32' flag!")
     assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
     torch.set_grad_enabled(False)
 
@@ -55,10 +27,24 @@ def main(args):
     dist.init_process_group("nccl")
     rank = dist.get_rank()
     device = rank % torch.cuda.device_count()
+
+    # Make sure each device has at least one image to sample:
+    assert args.num_images_per_class >= dist.get_world_size(), f"num_images_per_class must be >= {dist.get_world_size()}, we will implement a more flexible solution in the future."
     seed = args.global_seed * dist.get_world_size() + rank
     torch.manual_seed(seed)
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
+
+    if args.tf32: # True: fast but may lead to some small numerical differences
+        tf32 = True
+        torch.backends.cudnn.allow_tf32 = bool(tf32)
+        torch.backends.cuda.matmul.allow_tf32 = bool(tf32)
+        torch.set_float32_matmul_precision('high' if tf32 else 'highest')
+        if rank == 0:
+            print(f"Fast inference mode is enabled🏎️🏎️🏎️. TF32: {tf32}")
+    else:
+        if rank == 0:
+            print("Fast inference mode is disabled🐢🐢🐢, you may enable it by passing the '--tf32' flag!")
 
     if args.ckpt is None:
         assert args.model == "DiT-XL/2", "Only DiT-XL/2 models are available for auto-download."
@@ -109,7 +95,7 @@ def main(args):
 
     total = 0
     for _ in pbar:
-            # Create equally distributed class labels
+            # Create equally distributed class labels across all GPUs:
             y = torch.arange(args.num_classes, device=device).repeat_interleave(args.num_images_per_class // dist.get_world_size())
             y = y[total // dist.get_world_size(): total // dist.get_world_size() + n]
             
@@ -147,7 +133,6 @@ def main(args):
     # Make sure all processes have finished saving their samples before attempting to convert to .npz
     dist.barrier()
     if rank == 0:
-        # create_npz_from_sample_folder(sample_folder_dir, args.num_fid_samples)
         print("Done.")
         dist.barrier()
         dist.destroy_process_group()
