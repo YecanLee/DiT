@@ -1,9 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
 """
 Samples a large number of images from a pre-trained DiT model using DDP.
 Subsequently saves a .npz file that can be used to compute FID and other
@@ -17,7 +11,7 @@ from models import DiT_models
 from download import find_model
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-from tqdm import tqdm
+from tqdm import trange
 import os
 from PIL import Image
 import numpy as np
@@ -30,7 +24,7 @@ def create_npz_from_sample_folder(sample_dir, num=50_000):
     Builds a single .npz file from a folder of .png samples.
     """
     samples = []
-    for i in tqdm(range(num), desc="Building .npz file from samples"):
+    for i in trange(num, desc="Building .npz file from samples"):
         sample_pil = Image.open(f"{sample_dir}/{i:06d}.png")
         sample_np = np.asarray(sample_pil).astype(np.uint8)
         samples.append(sample_np)
@@ -46,7 +40,14 @@ def main(args):
     """
     Run sampling.
     """
-    torch.backends.cuda.matmul.allow_tf32 = args.tf32  # True: fast but may lead to some small numerical differences
+    if args.tf32: # True: fast but may lead to some small numerical differences
+        tf32 = True
+        torch.backends.cudnn.allow_tf32 = bool(tf32)
+        torch.backends.cuda.matmul.allow_tf32 = bool(tf32)
+        torch.set_float32_matmul_precision('high' if tf32 else 'highest')
+        print(f"Fast inference mode is enabled🏎️🏎️🏎️. TF32: {tf32}")
+    else:
+        print("Fast inference mode is disabled🐢🐢🐢, you may enable it by passing the '--tf32' flag!")
     assert torch.cuda.is_available(), "Sampling with DDP requires at least one GPU. sample.py supports CPU-only usage"
     torch.set_grad_enabled(False)
 
@@ -104,8 +105,7 @@ def main(args):
     samples_needed_this_gpu = int(total_samples // dist.get_world_size())
     assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
     iterations = int(samples_needed_this_gpu // n)
-    pbar = range(iterations)
-    pbar = tqdm(pbar, desc="Sampling images") if rank==0 else pbar
+    pbar = trange(iterations, desc="Sampling images") if rank==0 else range(iterations)
 
     total = 0
     for _ in pbar:
@@ -159,8 +159,8 @@ if __name__ == "__main__":
     parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=64)
-    parser.add_argument("--num-fid-samples", type=int, default=51_000)
-    parser.add_argument("--num-images-per-class",type=int, default=51, help="Number of images per class to sample.")
+    parser.add_argument("--num-fid-samples", type=int, default=50_000)
+    parser.add_argument("--num-images-per-class",type=int, default=50, help="Number of images per class to sample.")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale",  type=float, default=1.5)

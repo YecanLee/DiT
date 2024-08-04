@@ -97,7 +97,7 @@ def generate_samples(batch_labels, model, diffusion, vae, latent_size, device, c
         # Save and display images:
         for j in range(samples.shape[0]):
             index = i + (class_index) * 50
-            Image.fromarray(samples[j]).save(f"fix_samples/{index:06d}.png")
+            Image.fromarray(samples[j]).save(f"samples/{index:06d}.png")
         
         # Generate new sampling noise for each iteration
         z_cfg = torch.cat([torch.randn_like(z)]*2, 0)
